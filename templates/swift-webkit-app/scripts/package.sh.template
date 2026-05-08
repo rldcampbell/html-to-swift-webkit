@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PRODUCT_NAME=__PRODUCT_NAME__
+VERSION=__VERSION__
+APP_PATH="build/${PRODUCT_NAME}.app"
+ZIP_PATH="dist/${PRODUCT_NAME}-${VERSION}.zip"
+
+bash scripts/build.sh
+
+if ! command -v ditto >/dev/null 2>&1; then
+  echo "Error: ditto was not found. Packaging is only available on macOS." >&2
+  exit 1
+fi
+
+mkdir -p dist
+rm -f "${ZIP_PATH}"
+ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+
+echo "Packaged ${ZIP_PATH}"

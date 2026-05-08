@@ -1,0 +1,25 @@
+{
+  "name": "html-to-mac-webkit-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Create lightweight macOS Swift WebKit app scaffolds from single-file HTML apps.",
+  "type": "commonjs",
+  "packageManager": "yarn@1.22.22",
+  "main": "dist/generator.js",
+  "types": "dist/generator.d.ts",
+  "bin": {
+    "html-to-mac-webkit-app": "./bin/html-to-mac-webkit-app.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "create-app": "yarn build && node bin/html-to-mac-webkit-app.js",
+    "test": "yarn build && node bin/html-to-mac-webkit-app.js examples/sample.html --out .tmp/sample-app --overwrite --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.0"
+  }
+}

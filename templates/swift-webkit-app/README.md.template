@@ -1,0 +1,34 @@
+# __PRODUCT_NAME__
+
+This macOS app wraps `Sources/__MODULE_NAME__/Resources/__RESOURCE_HTML_NAME__` using Swift and WKWebView.
+
+V1 is designed for self-contained HTML first. Inline CSS, inline JavaScript, Canvas, and localStorage are good fits. Generated file downloads and broader browser behaviors may need native handlers in a future version.
+
+## Development
+
+```bash
+__BUILD_COMMAND__
+__RUN_COMMAND__
+```
+
+## Package a macOS .app
+
+```bash
+__BUILD_COMMAND__
+```
+
+The app bundle appears under `build/`.
+
+## Make Distributable ZIP
+
+```bash
+__PACKAGE_COMMAND__
+```
+
+The ZIP appears under `dist/`.
+
+## Signing and Notarization
+
+Unsigned local builds are useful for personal use and testing.
+
+For distribution to other Macs, configure Apple Developer code signing and notarization.

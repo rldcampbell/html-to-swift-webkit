@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PRODUCT_NAME=__PRODUCT_NAME__
+APP_PATH="build/${PRODUCT_NAME}.app"
+
+bash scripts/build.sh
+
+if ! command -v open >/dev/null 2>&1; then
+  echo "Error: open was not found. run-app is only available on macOS." >&2
+  exit 1
+fi
+
+open "${APP_PATH}"

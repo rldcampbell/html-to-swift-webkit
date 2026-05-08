@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PRODUCT_NAME=__PRODUCT_NAME__
+EXECUTABLE_NAME=__EXECUTABLE_NAME__
+MODULE_NAME=__MODULE_NAME__
+
+APP_PATH="build/${PRODUCT_NAME}.app"
+CONTENTS_PATH="${APP_PATH}/Contents"
+MACOS_PATH="${CONTENTS_PATH}/MacOS"
+RESOURCES_PATH="${CONTENTS_PATH}/Resources"
+
+if ! command -v swift >/dev/null 2>&1; then
+  echo "Error: swift was not found. Install Xcode command line tools, then run this script again." >&2
+  exit 1
+fi
+
+swift build -c release
+SWIFT_BUILD_DIR="$(swift build -c release --show-bin-path)"
+EXECUTABLE_PATH="${SWIFT_BUILD_DIR}/${EXECUTABLE_NAME}"
+
+if [ ! -f "${EXECUTABLE_PATH}" ]; then
+  echo "Error: expected release executable not found at ${EXECUTABLE_PATH}" >&2
+  exit 1
+fi
+
+rm -rf "${APP_PATH}"
+mkdir -p "${MACOS_PATH}" "${RESOURCES_PATH}"
+
+cp "${EXECUTABLE_PATH}" "${MACOS_PATH}/${EXECUTABLE_NAME}"
+chmod +x "${MACOS_PATH}/${EXECUTABLE_NAME}"
+cp "Sources/${MODULE_NAME}/Info.plist" "${CONTENTS_PATH}/Info.plist"
+printf "APPL????" > "${CONTENTS_PATH}/PkgInfo"
+
+if [ -d "Sources/${MODULE_NAME}/Resources" ]; then
+  cp -R "Sources/${MODULE_NAME}/Resources/." "${RESOURCES_PATH}/"
+fi
+
+copied_resource_bundle=0
+while IFS= read -r -d '' resource_bundle; do
+  bundle_name="$(basename "${resource_bundle}")"
+  rm -rf "${RESOURCES_PATH}/${bundle_name}" "${APP_PATH}/${bundle_name}"
+  cp -R "${resource_bundle}" "${RESOURCES_PATH}/"
+  cp -R "${resource_bundle}" "${APP_PATH}/"
+  copied_resource_bundle=1
+done < <(find "${SWIFT_BUILD_DIR}" -maxdepth 1 -type d \( -name "*.bundle" -o -name "*.resources" \) -print0)
+
+if [ "${copied_resource_bundle}" -eq 0 ]; then
+  echo "Warning: no SwiftPM resource bundle was found in ${SWIFT_BUILD_DIR}" >&2
+fi
+
+echo "Built ${APP_PATH}"
