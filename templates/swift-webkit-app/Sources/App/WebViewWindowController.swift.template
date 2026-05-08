@@ -1,9 +1,93 @@
 import AppKit
 import WebKit
 
-final class WebViewWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
+private enum SaveFileBridge {
+    static let messageName = "htmlToMacWebKitSaveFile"
+
+    static let script = #"""
+(() => {
+  if (window.__htmlToMacWebKitSaveFileBridgeInstalled) {
+    return;
+  }
+
+  window.__htmlToMacWebKitSaveFileBridgeInstalled = true;
+
+  const postSaveMessage = (payload) => {
+    window.webkit?.messageHandlers?.htmlToMacWebKitSaveFile?.postMessage(payload);
+  };
+
+  const filenameForAnchor = (anchor) => {
+    const filename = String(anchor.getAttribute("download") || "download").trim();
+    return filename || "download";
+  };
+
+  const elementFromTarget = (target) => {
+    if (!target) {
+      return null;
+    }
+
+    return target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement;
+  };
+
+  const shouldSaveAnchor = (anchor) => {
+    const href = anchor.href || anchor.getAttribute("href") || "";
+    return href.startsWith("blob:") || href.startsWith("data:");
+  };
+
+  const saveAnchor = async (anchor) => {
+    try {
+      const href = anchor.href || anchor.getAttribute("href") || "";
+      const response = await fetch(href);
+      const blob = await response.blob();
+      const reader = new FileReader();
+
+      reader.onloadend = () => {
+        const result = String(reader.result || "");
+        const commaIndex = result.indexOf(",");
+
+        postSaveMessage({
+          filename: filenameForAnchor(anchor),
+          mimeType: blob.type || "application/octet-stream",
+          base64Data: commaIndex >= 0 ? result.slice(commaIndex + 1) : ""
+        });
+      };
+
+      reader.readAsDataURL(blob);
+    } catch (error) {
+      console.error("Unable to prepare download for native save panel.", error);
+    }
+  };
+
+  document.addEventListener("click", (event) => {
+    const element = elementFromTarget(event.target);
+    const anchor = element?.closest?.("a[download]");
+
+    if (!anchor || !shouldSaveAnchor(anchor)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    saveAnchor(anchor);
+  }, true);
+
+  const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    if (this.hasAttribute("download") && shouldSaveAnchor(this)) {
+      saveAnchor(this);
+      return;
+    }
+
+    return nativeAnchorClick.call(this);
+  };
+})();
+"""#
+}
+
+final class WebViewWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
     private let webView: WKWebView
     private let resourcesURL: URL
+    private let userContentController: WKUserContentController
 
     init() {
         guard let resourceURL = Bundle.module.resourceURL else {
@@ -12,8 +96,18 @@ final class WebViewWindowController: NSWindowController, WKNavigationDelegate, W
 
         resourcesURL = resourceURL
 
+        let contentController = WKUserContentController()
+        let saveFileScript = WKUserScript(
+            source: SaveFileBridge.script,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        contentController.addUserScript(saveFileScript)
+        userContentController = contentController
+
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WKWebsiteDataStore.default()
+        configuration.userContentController = contentController
 
         webView = WKWebView(frame: .zero, configuration: configuration)
 
@@ -33,6 +127,11 @@ final class WebViewWindowController: NSWindowController, WKNavigationDelegate, W
 
         super.init(window: window)
 
+        userContentController.add(
+            WeakScriptMessageDelegate(self),
+            name: SaveFileBridge.messageName
+        )
+
         window.title = "__PRODUCT_NAME__"
         window.minSize = NSSize(width: __WINDOW_MIN_WIDTH__, height: __WINDOW_MIN_HEIGHT__)
         window.isReleasedWhenClosed = false
@@ -45,6 +144,10 @@ final class WebViewWindowController: NSWindowController, WKNavigationDelegate, W
         window.contentView = webView
 
         loadLocalHTML()
+    }
+
+    deinit {
+        userContentController.removeScriptMessageHandler(forName: SaveFileBridge.messageName)
     }
 
     @available(*, unavailable)
@@ -78,6 +181,11 @@ final class WebViewWindowController: NSWindowController, WKNavigationDelegate, W
             return
         }
 
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+            return
+        }
+
         if url.isFileURL {
             decisionHandler(isFileURLInsideResources(url) ? .allow : .cancel)
             return
@@ -100,10 +208,133 @@ final class WebViewWindowController: NSWindowController, WKNavigationDelegate, W
         decisionHandler(.cancel)
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        download.delegate = self
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        download.delegate = self
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping (URL?) -> Void
+    ) {
+        showSavePanel(suggestedFilename: suggestedFilename, completionHandler: completionHandler)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        showSaveError(error)
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == SaveFileBridge.messageName else {
+            return
+        }
+
+        guard
+            let body = message.body as? [String: Any],
+            let base64Data = body["base64Data"] as? String,
+            let data = Data(base64Encoded: base64Data, options: [.ignoreUnknownCharacters])
+        else {
+            return
+        }
+
+        let filename = body["filename"] as? String ?? "download"
+        saveDataWithPanel(data, suggestedFilename: filename)
+    }
+
     private func isFileURLInsideResources(_ url: URL) -> Bool {
         let resourcePath = resourcesURL.standardizedFileURL.resolvingSymlinksInPath().path
         let candidatePath = url.standardizedFileURL.resolvingSymlinksInPath().path
 
         return candidatePath == resourcePath || candidatePath.hasPrefix(resourcePath + "/")
+    }
+
+    private func saveDataWithPanel(_ data: Data, suggestedFilename: String) {
+        showSavePanel(suggestedFilename: suggestedFilename) { [weak self] url in
+            guard let self, let url else {
+                return
+            }
+
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                self.showSaveError(error)
+            }
+        }
+    }
+
+    private func showSavePanel(suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = sanitizedFilename(suggestedFilename)
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+
+        if let window {
+            panel.beginSheetModal(for: window) { result in
+                completionHandler(result == .OK ? panel.url : nil)
+            }
+        } else {
+            panel.begin { result in
+                completionHandler(result == .OK ? panel.url : nil)
+            }
+        }
+    }
+
+    private func sanitizedFilename(_ filename: String) -> String {
+        let invalidCharacters = CharacterSet(charactersIn: "/\\:\0").union(.newlines)
+        let sanitized = filename
+            .components(separatedBy: invalidCharacters)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return sanitized.isEmpty ? "download" : sanitized
+    }
+
+    private func showSaveError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Unable to save file"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+
+        if let window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+}
+
+private final class WeakScriptMessageDelegate: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
+
+    init(_ delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
     }
 }

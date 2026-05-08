@@ -50,6 +50,19 @@ Outputs:
 - `build/<Product Name>.app`
 - `dist/<Product Name>-<version>.zip`
 
+## HTML App Behavior
+
+Good fits:
+
+- Self-contained HTML with inline CSS and JavaScript
+- Canvas-based tools
+- `localStorage`
+- Common file exports using `a[download]` with `blob:` or `data:` URLs
+
+The generated app maps WebKit downloads to a macOS save panel. It also installs a narrow bridge for generated `blob:` and `data:` download links so exports like canvas JPG/PNG files go straight to `NSSavePanel` instead of navigating inside the WebView. The bridge handles normal clicks and common programmatic `anchor.click()` exports.
+
+The bridge only handles generated download bytes and a suggested filename. It does not expose broad native filesystem access to JavaScript.
+
 ## Direct CLI
 
 After building this creator project, you can run the binary shim directly:
@@ -61,4 +74,4 @@ node bin/html-to-mac-webkit-app.js examples/sample.html --out .tmp/sample-app --
 
 ## Notes
 
-V1 is designed for self-contained HTML files with inline CSS and JavaScript. Canvas and localStorage are good candidates. Generated file downloads, asset directory discovery, app icons, signing, notarization, and native save/open dialogs are intentionally left for later versions.
+Asset directory discovery, app icons, signing, notarization, and native open dialogs are intentionally left for later versions.

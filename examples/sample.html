@@ -21,6 +21,7 @@
     button {
       min-height: 40px;
       padding: 0 16px;
+      margin: 4px;
       border-radius: 8px;
       border: 1px solid #111111;
       background: #111111;
@@ -34,11 +35,13 @@
     <h1>Sample HTML App</h1>
     <p id="count">Clicked 0 times</p>
     <button id="button" type="button">Click</button>
+    <button id="export" type="button">Export JPG</button>
   </main>
   <script>
     let clicks = Number(localStorage.getItem("sample.clicks") || "0");
     const count = document.getElementById("count");
     const button = document.getElementById("button");
+    const exportButton = document.getElementById("export");
 
     function render() {
       count.textContent = `Clicked ${clicks} ${clicks === 1 ? "time" : "times"}`;
@@ -48,6 +51,36 @@
       clicks += 1;
       localStorage.setItem("sample.clicks", String(clicks));
       render();
+    });
+
+    exportButton.addEventListener("click", () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 960;
+      canvas.height = 540;
+
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#111111";
+      context.font = "700 56px Arial, sans-serif";
+      context.fillText("Sample HTML App", 64, 120);
+      context.font = "32px Arial, sans-serif";
+      context.fillText(`Clicked ${clicks} ${clicks === 1 ? "time" : "times"}`, 64, 184);
+      context.fillText(new Date().toLocaleString(), 64, 246);
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "sample-export.jpg";
+        link.click();
+
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, "image/jpeg", 0.92);
     });
 
     render();
